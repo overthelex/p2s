@@ -1,0 +1,17 @@
+[package]
+name = "p2s-validator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+p2s-proto = { path = "../proto" }
+ed25519-dalek = { workspace = true }
+serde = { workspace = true }
+ciborium = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }

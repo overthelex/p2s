@@ -1,0 +1,19 @@
+[package]
+name = "p2s-publisher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+p2s-card = { path = "../card" }
+p2s-proto = { path = "../proto" }
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }
