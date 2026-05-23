@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+mod sanitize;
+mod verdict;
+mod pipeline;
+mod agent;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use sanitize::sanitize_content;
+pub use verdict::{VerificationVerdict, AdmitDecision, compute_admit_decision};
+pub use pipeline::VerificationPipeline;
+pub use agent::{VerificationAgent, AgentAssessment, build_agent_prompt, parse_agent_response};

@@ -1,14 +1,7 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+mod challenge;
+mod domain_proof;
+mod error;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use challenge::{generate_challenge, ChallengeToken};
+pub use domain_proof::{verify_domain_dns, verify_domain_wellknown, DomainProofMethod};
+pub use error::PublisherError;

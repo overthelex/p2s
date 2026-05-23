@@ -26,7 +26,7 @@ serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 
 # Networking (libp2p)
-libp2p = { version = "0.54", features = ["tokio", "kad", "noise", "tcp", "yamux", "identify", "dns"] }
+libp2p = { version = "0.54", features = ["tokio", "kad", "noise", "tcp", "yamux", "identify", "dns", "macros"] }
 tokio = { version = "1", features = ["full"] }
 
 # Utilities

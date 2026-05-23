@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+mod config;
+mod record_store;
+mod behaviour;
+mod rate_limit;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use config::NodeConfig;
+pub use record_store::CardRecordStore;
+pub use behaviour::build_swarm;
+pub use rate_limit::{RateLimiter, RateLimitResult};
