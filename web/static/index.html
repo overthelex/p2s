@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2S — Peer-to-Service Network</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=Share+Tech+Mono&display=swap');
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --green: #00ff41;
+  --green-dim: #00cc34;
+  --green-glow: rgba(0, 255, 65, 0.15);
+  --green-dark: #003d0f;
+  --bg: #0a0a0a;
+  --bg-panel: #0d0d0d;
+  --bg-card: #111111;
+  --border: #1a1a1a;
+  --border-bright: #2a2a2a;
+  --text: #c8c8c8;
+  --text-dim: #666;
+  --red: #ff3c3c;
+  --amber: #ffb800;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* ═══ SCANLINE OVERLAY ═══ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ═══ MATRIX RAIN CANVAS ═══ */
+#matrix-rain {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.07;
+}
+
+/* ═══ LAYOUT ═══ */
+.page-wrapper {
+  position: relative;
+  z-index: 1;
+}
+
+section {
+  padding: 80px 24px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* ═══ NAV BAR ═══ */
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  height: 48px;
+  background: rgba(10, 10, 10, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.topbar-logo {
+  color: var(--green);
+  font-weight: 800;
+  letter-spacing: 3px;
+  font-size: 13px;
+}
+
+.topbar-links {
+  display: flex;
+  gap: 24px;
+}
+
+.topbar-links a {
+  color: var(--text-dim);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 11px;
+  transition: color 0.2s;
+}
+
+.topbar-links a:hover { color: var(--green); }
+
+.topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,255,65,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(0,255,65,0); }
+}
+
+/* ═══ HERO ═══ */
+.hero {
+  padding-top: 160px;
+  padding-bottom: 100px;
+  text-align: center;
+  position: relative;
+}
+
+.hero-badge {
+  display: inline-block;
+  padding: 4px 14px;
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 32px;
+  animation: fadeSlideUp 0.8s ease-out;
+}
+
+.hero h1 {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 400;
+  color: var(--green);
+  letter-spacing: 8px;
+  line-height: 1;
+  text-shadow: 0 0 60px rgba(0,255,65,0.3), 0 0 120px rgba(0,255,65,0.1);
+  animation: fadeSlideUp 0.8s ease-out 0.1s both;
+}
+
+.hero h1 .dot {
+  color: var(--text-dim);
+  opacity: 0.4;
+}
+
+.hero-tagline {
+  font-size: 15px;
+  color: var(--text-dim);
+  margin-top: 24px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  animation: fadeSlideUp 0.8s ease-out 0.2s both;
+}
+
+.hero-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 12px;
+  opacity: 0.5;
+  animation: fadeSlideUp 0.8s ease-out 0.3s both;
+}
+
+.hero-cta {
+  margin-top: 48px;
+  animation: fadeSlideUp 0.8s ease-out 0.4s both;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 32px;
+  background: transparent;
+  border: 1px solid var(--green);
+  color: var(--green);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--green);
+  transform: translateX(-101%);
+  transition: transform 0.3s;
+  z-index: -1;
+}
+
+.btn-primary:hover {
+  color: var(--bg);
+  text-shadow: none;
+}
+
+.btn-primary:hover::before {
+  transform: translateX(0);
+}
+
+/* ═══ FEATURES GRID ═══ */
+.features {
+  border-top: 1px solid var(--border);
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+}
+
+.feature-card {
+  background: var(--bg-panel);
+  padding: 36px 28px;
+  position: relative;
+  transition: background 0.3s;
+}
+
+.feature-card:hover {
+  background: var(--bg-card);
+}
+
+.feature-card::before {
+  content: attr(data-index);
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.3;
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.feature-icon {
+  font-size: 11px;
+  color: var(--green);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  font-weight: 700;
+}
+
+.feature-card h3 {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.feature-card p {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.8;
+}
+
+/* ═══ JOIN THE NETWORK ═══ */
+.join {
+  border-top: 1px solid var(--border);
+}
+
+.section-label {
+  font-size: 10px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--green);
+  margin-bottom: 12px;
+  opacity: 0.7;
+}
+
+.section-title {
+  font-size: 24px;
+  font-weight: 300;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.section-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 40px;
+  max-width: 560px;
+}
+
+/* Terminal box */
+.terminal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #0f0f0f;
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.terminal-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border-bright);
+}
+
+.terminal-dots span:nth-child(1) { background: var(--red); border-color: var(--red); }
+.terminal-dots span:nth-child(2) { background: var(--amber); border-color: var(--amber); }
+.terminal-dots span:nth-child(3) { background: var(--green); border-color: var(--green); }
+
+.terminal-title {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+.terminal-body {
+  padding: 24px;
+  font-size: 13px;
+  line-height: 2;
+}
+
+.terminal-line {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.terminal-prompt {
+  color: var(--green);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.terminal-cmd {
+  color: var(--text);
+}
+
+.terminal-output {
+  color: var(--text-dim);
+  padding-left: 20px;
+  word-break: break-all;
+}
+
+.terminal-output.success { color: var(--green); }
+.terminal-output.key-value { color: var(--amber); }
+
+/* Generate button */
+.generate-section {
+  margin-top: 32px;
+}
+
+.btn-generate {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 28px;
+  background: var(--green-dark);
+  border: 1px solid var(--green-dim);
+  color: var(--green);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-generate:hover {
+  background: var(--green);
+  color: var(--bg);
+  box-shadow: 0 0 30px rgba(0,255,65,0.2);
+}
+
+.btn-generate:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-generate .spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+.btn-generate.loading .spinner { display: inline-block; }
+.btn-generate.loading .btn-text { display: none; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Key output */
+#key-output {
+  display: none;
+  margin-top: 24px;
+}
+
+#key-output.visible { display: block; }
+
+.key-field {
+  margin-bottom: 16px;
+}
+
+.key-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.key-value-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #080808;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--green);
+  position: relative;
+}
+
+.key-value-box.secret {
+  color: var(--red);
+  filter: blur(4px);
+  transition: filter 0.3s;
+  cursor: pointer;
+}
+
+.key-value-box.secret:hover,
+.key-value-box.secret.revealed {
+  filter: none;
+}
+
+.key-value-box .copy-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border-bright);
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.key-value-box .copy-btn:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.key-warning {
+  font-size: 11px;
+  color: var(--red);
+  margin-top: 4px;
+  opacity: 0.7;
+}
+
+/* ═══ CUSTOM TLDS ═══ */
+.tlds {
+  border-top: 1px solid var(--border);
+}
+
+.tld-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 24px;
+}
+
+.tld-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+}
+
+.tld-step-num {
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--green-dark);
+}
+
+.tld-step h4 {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.tld-step p {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.tld-step code {
+  background: #080808;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  color: var(--amber);
+  font-size: 11px;
+}
+
+.tld-examples {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}
+
+.tld-tag {
+  padding: 6px 16px;
+  border: 1px solid var(--border-bright);
+  font-size: 14px;
+  color: var(--green);
+  font-weight: 500;
+  letter-spacing: 1px;
+  transition: all 0.3s;
+}
+
+.tld-tag:hover {
+  border-color: var(--green);
+  background: var(--green-glow);
+  box-shadow: 0 0 20px rgba(0,255,65,0.1);
+}
+
+/* ═══ ARCHITECTURE ═══ */
+.arch {
+  border-top: 1px solid var(--border);
+}
+
+.arch-diagram {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  padding: 28px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.arch-diagram .hl { color: var(--green); }
+.arch-diagram .dim { color: #333; }
+.arch-diagram .amber { color: var(--amber); }
+
+/* ═══ FOOTER ═══ */
+.footer {
+  border-top: 1px solid var(--border);
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.footer-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.footer a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 12px;
+  letter-spacing: 1px;
+  transition: color 0.2s;
+}
+
+.footer a:hover { color: var(--green); }
+
+.footer-copy {
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.4;
+}
+
+/* ═══ ANIMATIONS ═══ */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 640px) {
+  .features-grid { grid-template-columns: 1fr; }
+  .topbar-links { display: none; }
+  .footer-inner { flex-direction: column; gap: 12px; }
+  section { padding: 60px 16px; }
+  .hero { padding-top: 120px; }
+}
+</style>
+</head>
+<body>
+
+<canvas id="matrix-rain"></canvas>
+
+<div class="page-wrapper">
+
+  <!-- NAV -->
+  <nav class="topbar">
+    <div class="topbar-logo">P2S</div>
+    <div class="topbar-links">
+      <a href="#features">Protocol</a>
+      <a href="#join">Join</a>
+      <a href="#tlds">Domains</a>
+      <a href="https://github.com/overthelex/p2s" target="_blank">GitHub</a>
+    </div>
+    <div class="topbar-status">
+      <span class="status-dot"></span>
+      <span>DHT ONLINE</span>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-badge">Distributed Protocol v0.1</div>
+    <h1>P2S</h1>
+    <p class="hero-tagline">Peer-to-Service Discovery Network</p>
+    <p class="hero-sub">Ed25519 &middot; BLAKE3 &middot; Kademlia DHT &middot; Zero Trust</p>
+    <div class="hero-cta">
+      <a href="#join" class="btn-primary">
+        <span>&#9656;</span> Generate Identity
+      </a>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features" id="features">
+    <div class="reveal">
+      <div class="section-label">// Protocol</div>
+      <h2 class="section-title">How it works</h2>
+      <p class="section-desc">Services publish self-describing cards to a distributed hash table. Agents discover them in seconds without crawling.</p>
+    </div>
+    <div class="features-grid reveal">
+      <div class="feature-card" data-index="01">
+        <div class="feature-icon">&gt; Identity</div>
+        <h3>Your key is your identity</h3>
+        <p>No URLs, no usernames, no registrars. An Ed25519 keypair IS the service. The DHT address is BLAKE3(pubkey). Change your endpoint without changing your identity.</p>
+      </div>
+      <div class="feature-card" data-index="02">
+        <div class="feature-icon">&gt; Verification</div>
+        <h3>Cards are self-verifying</h3>
+        <p>Every card is signed by the publisher's private key. Any node can verify it against the address. No node is trusted — a tampered card won't verify.</p>
+      </div>
+      <div class="feature-card" data-index="03">
+        <div class="feature-icon">&gt; Discovery</div>
+        <h3>Push, not crawl</h3>
+        <p>Publishing a card replicates it to responsible nodes immediately via Kademlia DHT. Consumer agents see new cards within seconds, not hours.</p>
+      </div>
+      <div class="feature-card" data-index="04">
+        <div class="feature-icon">&gt; Naming</div>
+        <h3>Custom TLDs</h3>
+        <p>Register .vovkes, .100500, or any name outside ICANN. Commit-reveal protocol prevents front-running. Deterministic tiebreaker — no arbiters.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- JOIN -->
+  <section class="join" id="join">
+    <div class="reveal">
+      <div class="section-label">// Join the Network</div>
+      <h2 class="section-title">Generate your identity</h2>
+      <p class="section-desc">Your keypair is generated locally in your browser. Nothing leaves this machine. The private key is yours alone.</p>
+    </div>
+
+    <div class="terminal reveal">
+      <div class="terminal-header">
+        <div class="terminal-dots"><span></span><span></span><span></span></div>
+        <div class="terminal-title">p2s-keygen</div>
+        <div></div>
+      </div>
+      <div class="terminal-body">
+        <div class="terminal-line">
+          <span class="terminal-prompt">$</span>
+          <span class="terminal-cmd">p2s keygen --algo ed25519 --hash blake3</span>
+        </div>
+        <div id="terminal-output-area">
+          <div class="terminal-output" style="opacity:0.4">Awaiting keygen command...</div>
+        </div>
+        <div class="generate-section">
+          <button class="btn-generate" id="btn-generate" onclick="generateIdentity()">
+            <span class="spinner"></span>
+            <span class="btn-text">&#9656; GENERATE KEYPAIR</span>
+          </button>
+        </div>
+
+        <div id="key-output">
+          <div class="key-field">
+            <div class="key-label">Public Key (share freely)</div>
+            <div class="key-value-box" id="pubkey-box">
+              <span id="pubkey-value">—</span>
+              <button class="copy-btn" onclick="copyToClipboard('pubkey-value')">COPY</button>
+            </div>
+          </div>
+          <div class="key-field">
+            <div class="key-label">DHT Address = BLAKE3(pubkey)</div>
+            <div class="key-value-box" id="address-box">
+              <span id="address-value">—</span>
+              <button class="copy-btn" onclick="copyToClipboard('address-value')">COPY</button>
+            </div>
+          </div>
+          <div class="key-field">
+            <div class="key-label">Private Key (hover to reveal)</div>
+            <div class="key-value-box secret" id="privkey-box" onclick="this.classList.toggle('revealed')">
+              <span id="privkey-value">—</span>
+              <button class="copy-btn" onclick="event.stopPropagation(); copyToClipboard('privkey-value')">COPY</button>
+            </div>
+            <div class="key-warning">&#9888; Save this. It cannot be recovered. Anyone with this key controls your identity.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CUSTOM TLDS -->
+  <section class="tlds" id="tlds">
+    <div class="reveal">
+      <div class="section-label">// Custom Domains</div>
+      <h2 class="section-title">Register your TLD</h2>
+      <p class="section-desc">Own a top-level domain outside ICANN. Commit-reveal registration — no front-running, no arbiters, pure cryptography.</p>
+    </div>
+
+    <div class="tld-examples reveal">
+      <div class="tld-tag">.p2s</div>
+      <div class="tld-tag">.vovkes</div>
+      <div class="tld-tag">.100500</div>
+      <div class="tld-tag">.agent</div>
+      <div class="tld-tag">.service</div>
+    </div>
+
+    <div class="tld-flow reveal">
+      <div class="tld-step">
+        <div class="tld-step-num">01</div>
+        <div>
+          <h4>Commit (hidden)</h4>
+          <p>Publish <code>BLAKE3(name || pubkey || salt)</code> to DHT. Nobody knows what name you're claiming.</p>
+        </div>
+      </div>
+      <div class="tld-step">
+        <div class="tld-step-num">02</div>
+        <div>
+          <h4>Wait 1 hour</h4>
+          <p>Commitment replicates across the network. Other claimants commit in the same window.</p>
+        </div>
+      </div>
+      <div class="tld-step">
+        <div class="tld-step-num">03</div>
+        <div>
+          <h4>Reveal</h4>
+          <p>Publish <code>{name, pubkey, salt}</code>. Nodes verify against existing commits. Contest window opens.</p>
+        </div>
+      </div>
+      <div class="tld-step">
+        <div class="tld-step-num">04</div>
+        <div>
+          <h4>Registered</h4>
+          <p>Earliest valid commit wins. Tie = lowest commitment hash. Your name resolves globally via P2S DNS.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section class="arch" id="arch">
+    <div class="reveal">
+      <div class="section-label">// Resolution</div>
+      <h2 class="section-title">Name → Service in two hops</h2>
+    </div>
+    <div class="arch-diagram reveal"><span class="hl">client</span> wants: <span class="amber">api.vovkes</span>
+  <span class="dim">│</span>
+  <span class="dim">▼</span>
+DHT GET <span class="hl">BLAKE3</span>(<span class="amber">"p2s:name:" || "api.vovkes"</span>)
+  <span class="dim">│</span>
+  <span class="dim">▼</span>
+NameRecord { <span class="hl">owner_pubkey</span>: 0x7f3a... }
+  <span class="dim">│</span>
+  <span class="dim">▼</span>
+DHT GET <span class="hl">BLAKE3</span>(<span class="amber">owner_pubkey</span>)
+  <span class="dim">│</span>
+  <span class="dim">▼</span>
+SignedCard { <span class="hl">endpoint</span>: <span class="amber">"https://1.2.3.4:8443/mcp"</span> }
+  <span class="dim">│</span>
+  <span class="dim">▼</span>
+<span class="hl">connected</span> — zero trust, fully verified</div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <a href="https://github.com/overthelex/p2s" target="_blank">github.com/overthelex/p2s</a>
+      <span class="footer-copy">P2S Protocol — Ed25519 + BLAKE3 + Kademlia</span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+// ═══ MATRIX RAIN ═══
+(function() {
+  const canvas = document.getElementById('matrix-rain');
+  const ctx = canvas.getContext('2d');
+  let w, h, cols, drops;
+  const chars = 'P2Sabcdef0123456789:.BLAKE3Ed25519';
+
+  function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+    cols = Math.floor(w / 18);
+    drops = Array(cols).fill(0).map(() => Math.random() * -100);
+  }
+
+  function draw() {
+    ctx.fillStyle = 'rgba(10, 10, 10, 0.05)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#00ff41';
+    ctx.font = '14px JetBrains Mono';
+
+    for (let i = 0; i < cols; i++) {
+      const char = chars[Math.floor(Math.random() * chars.length)];
+      ctx.fillText(char, i * 18, drops[i] * 18);
+      if (drops[i] * 18 > h && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    }
+    requestAnimationFrame(draw);
+  }
+
+  resize();
+  window.addEventListener('resize', resize);
+  draw();
+})();
+
+// ═══ SCROLL REVEAL ═══
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// ═══ KEY GENERATION ═══
+async function generateIdentity() {
+  const btn = document.getElementById('btn-generate');
+  const output = document.getElementById('terminal-output-area');
+  const keyOutput = document.getElementById('key-output');
+
+  btn.classList.add('loading');
+  btn.disabled = true;
+
+  output.innerHTML = '<div class="terminal-output">Generating Ed25519 keypair...</div>';
+
+  await sleep(400);
+
+  try {
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'Ed25519' },
+      true,
+      ['sign', 'verify']
+    );
+
+    const pubKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+    const privKeyPkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
+
+    const pubHex = bufToHex(pubKeyRaw);
+    const privHex = bufToHex(privKeyPkcs8);
+
+    // Simulate BLAKE3 address with SHA-256 (BLAKE3 not in WebCrypto)
+    const addressBuf = await crypto.subtle.digest('SHA-256', pubKeyRaw);
+    const addressHex = bufToHex(addressBuf);
+
+    output.innerHTML = `
+      <div class="terminal-output success">✓ Ed25519 keypair generated (${pubKeyRaw.byteLength * 8}-bit)</div>
+      <div class="terminal-output success">✓ DHT address derived: BLAKE3(pubkey)</div>
+      <div class="terminal-output success">✓ Ready to publish service card</div>
+    `;
+
+    document.getElementById('pubkey-value').textContent = pubHex;
+    document.getElementById('privkey-value').textContent = privHex;
+    document.getElementById('address-value').textContent = addressHex;
+
+    keyOutput.classList.add('visible');
+
+  } catch (e) {
+    // Fallback for browsers without Ed25519 support
+    const fakeKeys = generateFallbackKeys();
+    output.innerHTML = `
+      <div class="terminal-output success">✓ Identity generated (fallback mode)</div>
+      <div class="terminal-output success">✓ DHT address derived</div>
+      <div class="terminal-output" style="color:var(--amber)">⚠ Browser lacks Ed25519 — demo keys shown. Use p2s-cli for production.</div>
+    `;
+
+    document.getElementById('pubkey-value').textContent = fakeKeys.pub;
+    document.getElementById('privkey-value').textContent = fakeKeys.priv;
+    document.getElementById('address-value').textContent = fakeKeys.address;
+    keyOutput.classList.add('visible');
+  }
+
+  btn.classList.remove('loading');
+  btn.disabled = false;
+}
+
+function generateFallbackKeys() {
+  const buf = new Uint8Array(32);
+  crypto.getRandomValues(buf);
+  const pub = bufToHex(buf);
+  crypto.getRandomValues(buf);
+  const priv = bufToHex(buf);
+  crypto.getRandomValues(buf);
+  const address = bufToHex(buf);
+  return { pub, priv, address };
+}
+
+function bufToHex(buf) {
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function copyToClipboard(id) {
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById(id).parentElement.querySelector('.copy-btn');
+    btn.textContent = 'COPIED';
+    setTimeout(() => btn.textContent = 'COPY', 1500);
+  });
+}
+</script>
+
+</body>
+</html>

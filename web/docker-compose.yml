@@ -1,0 +1,12 @@
+services:
+  p2s-web:
+    build: .
+    container_name: p2s-web
+    ports:
+      - "127.0.0.1:8420:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
