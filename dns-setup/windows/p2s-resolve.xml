@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Windows Service wrapper for p2s-resolve.
+  Install: sc.exe create p2s-resolve binPath="C:\Program Files\p2s\p2s-resolve.exe --listen 127.0.0.53:5353" start=auto
+  Or use NSSM: nssm install p2s-resolve "C:\Program Files\p2s\p2s-resolve.exe" "--listen 127.0.0.53:5353"
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Actions>
+    <Exec>
+      <Command>C:\Program Files\p2s\p2s-resolve.exe</Command>
+      <Arguments>--listen 127.0.0.53:5353</Arguments>
+    </Exec>
+  </Actions>
+  <Settings>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+  </Settings>
+</Task>
