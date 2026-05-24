@@ -1,0 +1,23 @@
+services:
+  p2s-node:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: p2s-node
+    ports:
+      - "4001:4001"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - p2s-data:/data
+    environment:
+      - RUST_LOG=p2s_node=info,libp2p=warn
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  p2s-data:

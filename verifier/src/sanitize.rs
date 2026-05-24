@@ -62,7 +62,6 @@ fn strip_tag_pair(s: &str, open: &str, close: &str) -> String {
             lower_remaining = &lower_remaining[start + skip..];
         } else {
             remaining = "";
-            lower_remaining = "";
             break;
         }
     }
@@ -129,7 +128,6 @@ fn strip_suspicious_meta_tags(s: &str) -> String {
             lower_remaining = &lower_remaining[start + end + 1..];
         } else {
             remaining = &remaining[start..];
-            lower_remaining = &lower_remaining[start..];
             break;
         }
     }

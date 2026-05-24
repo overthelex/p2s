@@ -1,4 +1,4 @@
-use crate::agent::{AgentAssessment, VerificationAgent};
+use crate::agent::VerificationAgent;
 use crate::sanitize::sanitize_content;
 use crate::verdict::{compute_admit_decision, AdmitDecision, VerificationVerdict};
 use anyhow::Result;

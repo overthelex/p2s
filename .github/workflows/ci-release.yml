@@ -1,0 +1,207 @@
+name: CI + Release
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  build-test:
+    name: Build & Test
+    runs-on: [self-hosted, p2s]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      should_release: ${{ steps.version.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        run: |
+          if ! command -v cargo &>/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          fi
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Rust version
+        run: |
+          source "$HOME/.cargo/env"
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-
+
+      - name: Build
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --workspace --release
+
+      - name: Unit tests
+        run: |
+          source "$HOME/.cargo/env"
+          cargo test --workspace
+
+      - name: Determine version
+        id: version
+        run: |
+          # Read version from Cargo.toml
+          CURRENT=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          # Count commits since last tag to auto-bump patch
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git rev-list --count HEAD)
+          else
+            COMMITS=$(git rev-list --count "${LAST_TAG}..HEAD")
+          fi
+
+          # Parse semver
+          MAJOR=$(echo $CURRENT | cut -d. -f1)
+          MINOR=$(echo $CURRENT | cut -d. -f2)
+          PATCH=$COMMITS
+
+          VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          TAG="v${VERSION}"
+
+          # Check if tag already exists
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION (tag: $TAG, commits since last tag: $COMMITS)"
+
+      - name: Upload binary
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2s-node-linux-amd64
+          path: target/release/p2s-node
+
+  docker:
+    name: Docker Image
+    runs-on: [self-hosted, p2s]
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -f docker/Dockerfile -t p2s-node:${{ needs.build-test.outputs.version }} -t p2s-node:latest .
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name p2s-ci-test -p 127.0.0.1:19080:8080 p2s-node:latest
+          sleep 3
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19080/health)
+          docker rm -f p2s-ci-test
+          if [ "$STATUS" != "200" ]; then
+            echo "Container health check failed: HTTP $STATUS"
+            exit 1
+          fi
+          echo "Container smoke test passed"
+
+  release:
+    name: Release
+    runs-on: [self-hosted, p2s]
+    needs: [build-test, docker]
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master' &&
+      needs.build-test.outputs.should_release == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: p2s-node-linux-amd64
+          path: ./release
+
+      - name: Prepare release assets
+        run: |
+          chmod +x ./release/p2s-node
+          cd release && tar czf p2s-node-linux-amd64.tar.gz p2s-node
+          sha256sum p2s-node-linux-amd64.tar.gz > checksums.txt
+          sha256sum p2s-node >> checksums.txt
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            CHANGES=$(git log --oneline --no-merges | head -20)
+          else
+            CHANGES=$(git log --oneline --no-merges "${LAST_TAG}..HEAD")
+          fi
+
+          # Write to file for multiline output
+          cat > release_notes.md << 'NOTES_EOF'
+          ## P2S Node ${{ needs.build-test.outputs.tag }}
+
+          ### Changes
+          NOTES_EOF
+
+          echo "$CHANGES" | while read line; do
+            echo "- ${line}" >> release_notes.md
+          done
+
+          cat >> release_notes.md << 'NOTES_EOF'
+
+          ### Quick Start
+          ```bash
+          # Run directly
+          chmod +x p2s-node
+          ./p2s-node --data-dir ./my-node
+
+          # Or with Docker
+          docker pull p2s-node:latest
+          docker run -d -p 4001:4001 -p 8080:8080 -v p2s-data:/data p2s-node:latest
+          ```
+
+          ### Verify
+          ```bash
+          sha256sum -c checksums.txt
+          ```
+          NOTES_EOF
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a ${{ needs.build-test.outputs.tag }} -m "Release ${{ needs.build-test.outputs.tag }}"
+          git push origin ${{ needs.build-test.outputs.tag }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ needs.build-test.outputs.tag }} \
+            --title "P2S Node ${{ needs.build-test.outputs.tag }}" \
+            --notes-file release_notes.md \
+            ./release/p2s-node-linux-amd64.tar.gz \
+            ./release/checksums.txt
