@@ -61,6 +61,7 @@ async fn main() -> Result<()> {
         listen_addr: "0.0.0.0:4001".parse().unwrap(),
         validator_keys,
         replication_factor: 20,
+        data_dir: Some(cli.data_dir.clone()),
     };
 
     let mut swarm = build_swarm(keypair, &config)?;
@@ -86,6 +87,7 @@ async fn main() -> Result<()> {
         cmd_tx,
         pending_queries: Arc::new(Mutex::new(HashMap::new())),
         metrics: Metrics::new(),
+        rate_limiter: Mutex::new(p2s_node::RateLimiter::new()),
     });
 
     let event_state = state.clone();

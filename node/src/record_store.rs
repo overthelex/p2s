@@ -15,6 +15,7 @@ pub struct CardRecordStore {
     records: HashMap<RecordKey, Record>,
     seq_cache: HashMap<RecordKey, u64>,
     max_records: usize,
+    db: Option<sled::Db>,
 }
 
 impl CardRecordStore {
@@ -23,6 +24,56 @@ impl CardRecordStore {
             records: HashMap::new(),
             seq_cache: HashMap::new(),
             max_records,
+            db: None,
+        }
+    }
+
+    pub fn with_persistence(max_records: usize, path: &std::path::Path) -> Self {
+        let db_path = path.join("cards.sled");
+        let db = sled::open(&db_path).ok();
+
+        let mut store = Self {
+            records: HashMap::new(),
+            seq_cache: HashMap::new(),
+            max_records,
+            db,
+        };
+        store.load_from_disk();
+        store
+    }
+
+    fn load_from_disk(&mut self) {
+        let Some(db) = &self.db else { return };
+        let mut loaded = 0;
+        for entry in db.iter() {
+            let Ok((key_bytes, value_bytes)) = entry else { continue };
+            let record = Record {
+                key: RecordKey::new(&key_bytes),
+                value: value_bytes.to_vec(),
+                publisher: None,
+                expires: None,
+            };
+            if let Ok(seq) = self.validate_and_extract_seq(&record) {
+                let rk = record.key.clone();
+                self.seq_cache.insert(rk.clone(), seq);
+                self.records.insert(rk, record);
+                loaded += 1;
+            }
+        }
+        if loaded > 0 {
+            tracing::info!(loaded, "Loaded records from disk");
+        }
+    }
+
+    fn persist(&self, record: &Record) {
+        if let Some(db) = &self.db {
+            let _ = db.insert(record.key.as_ref(), record.value.as_slice());
+        }
+    }
+
+    fn unpersist(&self, key: &RecordKey) {
+        if let Some(db) = &self.db {
+            let _ = db.remove(key.as_ref());
         }
     }
 
@@ -69,6 +120,7 @@ impl RecordStore for CardRecordStore {
 
         let key = record.key.clone();
         self.seq_cache.insert(key.clone(), new_seq);
+        self.persist(&record);
         self.records.insert(key, record);
         Ok(())
     }
@@ -76,6 +128,7 @@ impl RecordStore for CardRecordStore {
     fn remove(&mut self, key: &RecordKey) {
         self.records.remove(key);
         self.seq_cache.remove(key);
+        self.unpersist(key);
     }
 
     fn records(&self) -> Self::RecordsIter<'_> {

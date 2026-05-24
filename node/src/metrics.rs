@@ -114,15 +114,15 @@ impl Metrics {
         out.push_str(&format!("p2s_cards_get_found {}\n", m.cards_get_found.load(Ordering::Relaxed)));
         out.push_str(&format!("p2s_cards_get_not_found {}\n", m.cards_get_not_found.load(Ordering::Relaxed)));
 
-        let put_total = m.cards_put_total.load(Ordering::Relaxed).max(1);
-        let put_avg = m.put_latency_sum_us.load(Ordering::Relaxed) / put_total;
+        let put_success = m.cards_put_success.load(Ordering::Relaxed).max(1);
+        let put_avg = m.put_latency_sum_us.load(Ordering::Relaxed) / put_success;
         out.push_str(&format!("p2s_put_latency_avg_us {put_avg}\n"));
         for (i, label) in labels.iter().enumerate() {
             out.push_str(&format!("p2s_put_latency_bucket{{bucket=\"{label}\"}} {}\n", m.put_latency_buckets[i].load(Ordering::Relaxed)));
         }
 
-        let get_total = m.cards_get_total.load(Ordering::Relaxed).max(1);
-        let get_avg = m.get_latency_sum_us.load(Ordering::Relaxed) / get_total;
+        let get_found = m.cards_get_found.load(Ordering::Relaxed).max(1);
+        let get_avg = m.get_latency_sum_us.load(Ordering::Relaxed) / get_found;
         out.push_str(&format!("p2s_get_latency_avg_us {get_avg}\n"));
         for (i, label) in labels.iter().enumerate() {
             out.push_str(&format!("p2s_get_latency_bucket{{bucket=\"{label}\"}} {}\n", m.get_latency_buckets[i].load(Ordering::Relaxed)));
@@ -142,8 +142,8 @@ impl Metrics {
 
     pub fn render_json(&self) -> serde_json::Value {
         let m = &self.inner;
-        let put_total = m.cards_put_total.load(Ordering::Relaxed).max(1);
-        let get_total = m.cards_get_total.load(Ordering::Relaxed).max(1);
+        let put_success = m.cards_put_success.load(Ordering::Relaxed).max(1);
+        let get_found = m.cards_get_found.load(Ordering::Relaxed).max(1);
         serde_json::json!({
             "uptime_seconds": m.start_time.elapsed().as_secs(),
             "cards": {
@@ -155,8 +155,8 @@ impl Metrics {
                 "get_not_found": m.cards_get_not_found.load(Ordering::Relaxed),
             },
             "latency_us": {
-                "put_avg": m.put_latency_sum_us.load(Ordering::Relaxed) / put_total,
-                "get_avg": m.get_latency_sum_us.load(Ordering::Relaxed) / get_total,
+                "put_avg": m.put_latency_sum_us.load(Ordering::Relaxed) / put_success,
+                "get_avg": m.get_latency_sum_us.load(Ordering::Relaxed) / get_found,
             },
             "dht": {
                 "records_stored": m.dht_records_stored.load(Ordering::Relaxed),
