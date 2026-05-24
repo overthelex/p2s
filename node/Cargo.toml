@@ -25,3 +25,4 @@ clap = { workspace = true }
 axum = { workspace = true }
 serde_json = { workspace = true }
 hex = { workspace = true }
+portable-atomic = "1"
