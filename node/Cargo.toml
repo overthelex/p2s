@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "p2s-node"
+path = "src/main.rs"
+
 [dependencies]
 p2s-card = { path = "../card" }
 p2s-proto = { path = "../proto" }
@@ -17,3 +21,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
+clap = { workspace = true }
+axum = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
