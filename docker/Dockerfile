@@ -11,7 +11,7 @@ COPY verifier/ verifier/
 RUN cargo build --release --bin p2s-node
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget iproute2 && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/p2s-node /usr/local/bin/p2s-node
 RUN mkdir -p /data
 ENV RUST_LOG=p2s_node=info,libp2p=warn
