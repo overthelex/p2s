@@ -1,5 +1,6 @@
 use crate::node_state::{NodeState, PendingQuery, QueryResult, SwarmCommand};
 use libp2p::futures::StreamExt;
+use libp2p::kad::store::RecordStore;
 use libp2p::kad::{self, QueryResult as KadQueryResult};
 use libp2p::swarm::SwarmEvent;
 use libp2p::Swarm;
@@ -93,10 +94,11 @@ fn handle_kad_event(event: kad::Event, state: &Arc<NodeState>) {
                         }
                     }
                 }
-                KadQueryResult::PutRecord(Err(e)) => {
+                KadQueryResult::PutRecord(Err(_)) => {
+                    // Replication failed (e.g. no peers) but local store already succeeded
                     if let Ok(mut pending) = state.pending_queries.lock() {
                         if let Some(pq) = pending.remove(&id) {
-                            let _ = pq.reply.send(QueryResult::Error(format!("{e:?}")));
+                            let _ = pq.reply.send(QueryResult::PutOk);
                         }
                     }
                 }
@@ -119,13 +121,27 @@ fn handle_command(cmd: SwarmCommand, swarm: &mut Swarm<NodeBehaviour>, state: &A
                 publisher: None,
                 expires: None,
             };
-            match swarm.behaviour_mut().kademlia.put_record(record, libp2p::kad::Quorum::One) {
-                Ok(query_id) => {
-                    if let Ok(mut pending) = state.pending_queries.lock() {
-                        pending.insert(query_id, PendingQuery { reply });
-                    }
+            // Store locally first (always succeeds if validation passes)
+            let store_result = swarm.behaviour_mut().kademlia
+                .store_mut()
+                .put(record.clone());
+
+            match store_result {
+                Ok(()) => {
                     if let Ok(mut count) = state.stored_records.write() {
                         *count += 1;
+                    }
+                    // Then replicate to peers (best-effort, don't block on quorum)
+                    match swarm.behaviour_mut().kademlia.put_record(record, libp2p::kad::Quorum::One) {
+                        Ok(query_id) => {
+                            if let Ok(mut pending) = state.pending_queries.lock() {
+                                pending.insert(query_id, PendingQuery { reply });
+                            }
+                        }
+                        Err(_) => {
+                            // Replication failed (no peers) but local store succeeded
+                            let _ = reply.send(QueryResult::PutOk);
+                        }
                     }
                 }
                 Err(e) => {

@@ -8,6 +8,7 @@ COPY validator/ validator/
 COPY publisher/ publisher/
 COPY consumer/ consumer/
 COPY verifier/ verifier/
+COPY tools/ tools/
 RUN cargo build --release --bin p2s-node
 
 FROM debian:bookworm-slim

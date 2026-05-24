@@ -6,7 +6,7 @@ members = [
     "validator",
     "publisher",
     "verifier",
-    "consumer",
+    "consumer", "tools",
 ]
 resolver = "3"
 
