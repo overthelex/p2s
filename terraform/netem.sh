@@ -15,18 +15,9 @@ if [ -z "$IFACE" ]; then
     exit 1
 fi
 
-# Clean existing rules
-tc qdisc del dev "$IFACE" root 2>/dev/null || true
-
-# Apply netem: delay + jitter + loss + rate limiting
-tc qdisc add dev "$IFACE" root handle 1: netem \
+# Apply netem: delay + jitter + loss (replace works on noqueue)
+tc qdisc replace dev "$IFACE" root handle 1: netem \
     delay ${delay} ${jitter} distribution normal \
     loss ${loss}%
-
-# Add rate limiting as child qdisc
-tc qdisc add dev "$IFACE" parent 1: handle 2: tbf \
-    rate ${rate} \
-    burst 256kb \
-    latency 100ms
 
 echo "Applied: delay=${delay} jitter=${jitter} loss=${loss}% rate=${rate} on $IFACE"

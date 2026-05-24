@@ -89,25 +89,27 @@ locals {
   backbone_subnet  = "10.50.0.0/16"
   backbone_gateway = "10.50.0.1"
 
+  region_order = ["datacenter", "broadband", "emerging", "mobile", "satellite"]
+
   nodes = flatten([
-    for region_name, region in local.regions : [
-      for i in range(region.count) : {
+    for region_name in local.region_order : [
+      for i in range(local.regions[region_name].count) : {
         name        = "p2s-${region_name}-${i + 1}"
         region      = region_name
         index       = i
-        ip          = "${region.ip_base}.${(i + 10) % 256}"
-        backbone_ip = "10.50.${index(keys(local.regions), region_name) + 1}.${i + 10}"
-        http_port   = region.http_base + i + 1
-        delay       = region.delay
-        jitter      = region.jitter
-        loss        = region.loss
-        rate        = region.rate
+        ip          = "${local.regions[region_name].ip_base}.${(i + 10) % 256}"
+        backbone_ip = "10.50.${index(local.region_order, region_name) + 1}.${i + 10}"
+        http_port   = local.regions[region_name].http_base + i + 1
+        delay       = local.regions[region_name].delay
+        jitter      = local.regions[region_name].jitter
+        loss        = local.regions[region_name].loss
+        rate        = local.regions[region_name].rate
         network     = region_name
       }
     ]
   ])
 
-  bootstrap_node = local.nodes[0]
+  bootstrap_node = local.nodes[0] # guaranteed datacenter-1
 }
 
 # ═══ Networks ═══

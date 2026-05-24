@@ -122,9 +122,9 @@ echo ""
 echo "▸ Test 5: tc/netem shaping active"
 for region in datacenter broadband emerging mobile satellite; do
     container="p2s-${region}-1"
-    tc_output=$(docker exec "$container" tc qdisc show 2>/dev/null | grep -c "netem\|tbf" || echo "0")
-    if [ "$tc_output" -ge 1 ]; then
-        delay_actual=$(docker exec "$container" tc qdisc show 2>/dev/null | grep netem | head -1)
+    tc_output=$(docker exec "$container" tc qdisc show dev eth0 2>/dev/null | grep -c "netem" || true)
+    if [ "$tc_output" -ge 1 ] 2>/dev/null; then
+        delay_actual=$(docker exec "$container" tc qdisc show dev eth0 2>/dev/null | grep netem | head -1)
         log_test "${region} netem active: ${delay_actual}" "PASS"
     else
         log_test "${region} netem shaping" "FAIL" "tc rules not found"
