@@ -1,5 +1,6 @@
 use crate::metrics::Metrics;
 use libp2p::{Multiaddr, PeerId};
+use p2s_node::RateLimiter;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::{mpsc, oneshot};
@@ -13,6 +14,7 @@ pub struct NodeState {
     pub cmd_tx: mpsc::Sender<SwarmCommand>,
     pub pending_queries: Arc<Mutex<HashMap<QueryId, PendingQuery>>>,
     pub metrics: Metrics,
+    pub rate_limiter: Mutex<RateLimiter>,
 }
 
 pub struct PendingQuery {

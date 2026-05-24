@@ -1,5 +1,6 @@
 use crate::node_state::{NodeState, PendingQuery, QueryResult, SwarmCommand};
 use libp2p::futures::StreamExt;
+use libp2p::identify;
 use libp2p::kad::store::RecordStore;
 use libp2p::kad::{self, QueryResult as KadQueryResult};
 use libp2p::swarm::SwarmEvent;
@@ -17,7 +18,7 @@ pub async fn run_event_loop(
     loop {
         tokio::select! {
             event = swarm.select_next_some() => {
-                handle_swarm_event(event, &state);
+                handle_swarm_event(event, &mut swarm, &state);
             }
             Some(cmd) = cmd_rx.recv() => {
                 handle_command(cmd, &mut swarm, &state);
@@ -30,14 +31,27 @@ pub async fn run_event_loop(
     }
 }
 
-fn handle_swarm_event(event: SwarmEvent<NodeBehaviourEvent>, state: &Arc<NodeState>) {
+fn handle_swarm_event(
+    event: SwarmEvent<NodeBehaviourEvent>,
+    swarm: &mut Swarm<NodeBehaviour>,
+    state: &Arc<NodeState>,
+) {
     match event {
         SwarmEvent::Behaviour(NodeBehaviourEvent::Kademlia(kad_event)) => {
             handle_kad_event(kad_event, state);
         }
-        SwarmEvent::Behaviour(NodeBehaviourEvent::Identify(identify_event)) => {
-            tracing::debug!(?identify_event, "identify event");
+        SwarmEvent::Behaviour(NodeBehaviourEvent::Identify(identify::Event::Received {
+            peer_id,
+            info,
+            ..
+        })) => {
+            tracing::info!(%peer_id, protocols = ?info.protocols.len(), addrs = ?info.listen_addrs.len(), "Identify: peer discovered");
+            for addr in &info.listen_addrs {
+                swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
+            }
+            state.metrics.set_peers(swarm.connected_peers().count() as u64);
         }
+        SwarmEvent::Behaviour(NodeBehaviourEvent::Identify(_)) => {}
         SwarmEvent::NewListenAddr { address, .. } => {
             tracing::info!(%address, "Listening on");
             if let Ok(mut addrs) = state.listen_addrs.write() {
@@ -49,12 +63,14 @@ fn handle_swarm_event(event: SwarmEvent<NodeBehaviourEvent>, state: &Arc<NodeSta
             if let Ok(mut count) = state.connected_peers.write() {
                 *count += 1;
             }
+            state.metrics.set_peers(swarm.connected_peers().count() as u64);
         }
         SwarmEvent::ConnectionClosed { peer_id, .. } => {
             tracing::debug!(%peer_id, "Connection closed");
             if let Ok(mut count) = state.connected_peers.write() {
                 *count = count.saturating_sub(1);
             }
+            state.metrics.set_peers(swarm.connected_peers().count() as u64);
         }
         _ => {}
     }
@@ -72,7 +88,6 @@ fn handle_kad_event(event: kad::Event, state: &Arc<NodeState>) {
                     }
                 }
                 KadQueryResult::GetRecord(Ok(kad::GetRecordOk::FinishedWithNoAdditionalRecord { .. })) => {
-                    // Query finished — if we haven't replied yet, it's NotFound
                     if let Ok(mut pending) = state.pending_queries.lock() {
                         if let Some(pq) = pending.remove(&id) {
                             let _ = pq.reply.send(QueryResult::NotFound);
@@ -95,12 +110,17 @@ fn handle_kad_event(event: kad::Event, state: &Arc<NodeState>) {
                     }
                 }
                 KadQueryResult::PutRecord(Err(_)) => {
-                    // Replication failed (e.g. no peers) but local store already succeeded
                     if let Ok(mut pending) = state.pending_queries.lock() {
                         if let Some(pq) = pending.remove(&id) {
                             let _ = pq.reply.send(QueryResult::PutOk);
                         }
                     }
+                }
+                KadQueryResult::Bootstrap(Ok(result)) => {
+                    tracing::info!(num_remaining = result.num_remaining, "Kademlia bootstrap progress");
+                }
+                KadQueryResult::Bootstrap(Err(e)) => {
+                    tracing::warn!(?e, "Kademlia bootstrap failed");
                 }
                 _ => {}
             }
@@ -121,7 +141,6 @@ fn handle_command(cmd: SwarmCommand, swarm: &mut Swarm<NodeBehaviour>, state: &A
                 publisher: None,
                 expires: None,
             };
-            // Store locally first (always succeeds if validation passes)
             let store_result = swarm.behaviour_mut().kademlia
                 .store_mut()
                 .put(record.clone());
@@ -131,7 +150,7 @@ fn handle_command(cmd: SwarmCommand, swarm: &mut Swarm<NodeBehaviour>, state: &A
                     if let Ok(mut count) = state.stored_records.write() {
                         *count += 1;
                     }
-                    // Then replicate to peers (best-effort, don't block on quorum)
+                    state.metrics.set_records(state.stored_records.read().map(|c| *c as u64).unwrap_or(0));
                     match swarm.behaviour_mut().kademlia.put_record(record, libp2p::kad::Quorum::One) {
                         Ok(query_id) => {
                             if let Ok(mut pending) = state.pending_queries.lock() {
@@ -139,7 +158,6 @@ fn handle_command(cmd: SwarmCommand, swarm: &mut Swarm<NodeBehaviour>, state: &A
                             }
                         }
                         Err(_) => {
-                            // Replication failed (no peers) but local store succeeded
                             let _ = reply.send(QueryResult::PutOk);
                         }
                     }
@@ -150,7 +168,13 @@ fn handle_command(cmd: SwarmCommand, swarm: &mut Swarm<NodeBehaviour>, state: &A
             }
         }
         SwarmCommand::GetRecord { key, reply } => {
-            let query_id = swarm.behaviour_mut().kademlia.get_record(libp2p::kad::RecordKey::new(&key));
+            // Try local store first before going to DHT
+            let record_key = libp2p::kad::RecordKey::new(&key);
+            if let Some(record) = swarm.behaviour_mut().kademlia.store_mut().get(&record_key) {
+                let _ = reply.send(QueryResult::Found(record.into_owned().value));
+                return;
+            }
+            let query_id = swarm.behaviour_mut().kademlia.get_record(record_key);
             if let Ok(mut pending) = state.pending_queries.lock() {
                 pending.insert(query_id, PendingQuery { reply });
             }

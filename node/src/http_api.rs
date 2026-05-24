@@ -12,6 +12,7 @@ use tokio::sync::oneshot;
 pub fn build_router(state: Arc<NodeState>) -> Router {
     Router::new()
         .route("/cards", post(publish_card))
+        .route("/cards/batch", post(publish_batch))
         .route("/cards/{address}", get(fetch_card))
         .route("/health", get(health))
         .route("/node/info", get(node_info))
@@ -78,13 +79,38 @@ async fn publish_card(
         sig,
     };
 
-    if let Err(e) = p2s_card::verify_card(&signed_card) {
-        state.metrics.inc_sig_fail();
-        state.metrics.inc_put_rejected();
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("card verification failed: {e}")})));
+    let card_for_verify = signed_card.clone();
+    let verify_result = tokio::task::spawn_blocking(move || {
+        p2s_card::verify_card(&card_for_verify)
+    }).await;
+    match verify_result {
+        Ok(Ok(())) => { state.metrics.inc_sig_ok(); }
+        Ok(Err(e)) => {
+            state.metrics.inc_sig_fail();
+            state.metrics.inc_put_rejected();
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("card verification failed: {e}")})));
+        }
+        Err(_) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "verification task failed"})));
+        }
     }
-    state.metrics.inc_sig_ok();
 
+    // Rate limiting per domain
+    if let Ok(limiter) = state.rate_limiter.lock() {
+        match limiter.check(&signed_card.record.domain) {
+            p2s_node::RateLimitResult::TooManyCards { domain, max, .. } => {
+                state.metrics.inc_put_rejected();
+                return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": format!("rate limit: domain {domain} has reached max {max} cards")})));
+            }
+            p2s_node::RateLimitResult::CooldownActive { domain, remaining_secs } => {
+                state.metrics.inc_put_rejected();
+                return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": format!("rate limit: domain {domain} cooldown, retry in {remaining_secs}s")})));
+            }
+            p2s_node::RateLimitResult::Allowed => {}
+        }
+    }
+
+    let card_domain = signed_card.record.domain.clone();
     let address = p2s_card::compute_address(&pubkey);
     let value = match p2s_proto::canonical_encode(&signed_card) {
         Ok(v) => v,
@@ -101,6 +127,9 @@ async fn publish_card(
     let result = match tokio::time::timeout(std::time::Duration::from_secs(10), reply_rx).await {
         Ok(Ok(QueryResult::PutOk)) => {
             state.metrics.inc_put_success();
+            if let Ok(mut limiter) = state.rate_limiter.lock() {
+                limiter.record_publish(&card_domain);
+            }
             (StatusCode::CREATED, Json(serde_json::json!({"address": hex::encode(address), "status": "published"})))
         }
         Ok(Ok(QueryResult::Error(e))) => {
@@ -115,6 +144,59 @@ async fn publish_card(
 
     state.metrics.record_put_latency(start.elapsed().as_micros() as u64);
     result
+}
+
+async fn publish_batch(
+    State(state): State<Arc<NodeState>>,
+    Json(cards): Json<Vec<PublishCardRequest>>,
+) -> impl IntoResponse {
+    let mut results = Vec::with_capacity(cards.len());
+    let mut ok = 0u64;
+    let mut fail = 0u64;
+
+    for req in cards {
+        state.metrics.inc_http_requests();
+        state.metrics.inc_put_total();
+        let start = std::time::Instant::now();
+
+        let pubkey = match hex::decode(&req.record.pubkey) { Ok(b) => b, Err(_) => { fail += 1; state.metrics.inc_put_rejected(); continue } };
+        let sig = match hex::decode(&req.sig) { Ok(b) => b, Err(_) => { fail += 1; state.metrics.inc_put_rejected(); continue } };
+        let manifest_hash = match hex::decode(&req.record.manifest_hash) { Ok(b) => b, Err(_) => { fail += 1; state.metrics.inc_put_rejected(); continue } };
+        let status = match req.record.status.as_str() { "active" => p2s_proto::CardStatus::Active, "revoked" => p2s_proto::CardStatus::Revoked, _ => { fail += 1; state.metrics.inc_put_rejected(); continue } };
+
+        let signed_card = p2s_proto::SignedCard {
+            record: p2s_proto::CardRecord { pubkey: pubkey.clone(), seq: req.record.seq, status, endpoint: req.record.endpoint, manifest_hash, domain: req.record.domain, label: req.record.label },
+            sig,
+        };
+
+        if p2s_card::verify_card(&signed_card).is_err() {
+            fail += 1; state.metrics.inc_sig_fail(); state.metrics.inc_put_rejected(); continue;
+        }
+        state.metrics.inc_sig_ok();
+
+        let address = p2s_card::compute_address(&pubkey);
+        let value = match p2s_proto::canonical_encode(&signed_card) { Ok(v) => v, Err(_) => { fail += 1; continue } };
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let cmd = SwarmCommand::PutRecord { key: address.to_vec(), value, reply: reply_tx };
+        if state.cmd_tx.send(cmd).await.is_err() { fail += 1; continue; }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(10), reply_rx).await {
+            Ok(Ok(QueryResult::PutOk)) => {
+                ok += 1;
+                state.metrics.inc_put_success();
+                if let Ok(mut limiter) = state.rate_limiter.lock() {
+                    limiter.record_publish(&signed_card.record.domain);
+                }
+                results.push(serde_json::json!({"address": hex::encode(address), "status": "published"}));
+            }
+            _ => { fail += 1; state.metrics.inc_put_rejected(); }
+        }
+
+        state.metrics.record_put_latency(start.elapsed().as_micros() as u64);
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({"ok": ok, "fail": fail, "results": results})))
 }
 
 async fn fetch_card(

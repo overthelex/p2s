@@ -23,7 +23,11 @@ pub fn build_swarm(
 ) -> anyhow::Result<Swarm<NodeBehaviour>> {
     let peer_id = keypair.public().to_peer_id();
 
-    let store = CardRecordStore::new(MAX_RECORDS);
+    let store = if let Some(ref data_dir) = config.data_dir {
+        CardRecordStore::with_persistence(MAX_RECORDS, data_dir)
+    } else {
+        CardRecordStore::new(MAX_RECORDS)
+    };
 
     let mut kad_config = kad::Config::new(PROTOCOL_NAME);
     kad_config.set_replication_factor(
@@ -32,7 +36,8 @@ pub fn build_swarm(
     kad_config.set_record_ttl(None);
     kad_config.set_provider_record_ttl(None);
 
-    let kademlia = kad::Behaviour::with_config(peer_id, store, kad_config);
+    let mut kademlia = kad::Behaviour::with_config(peer_id, store, kad_config);
+    kademlia.set_mode(Some(kad::Mode::Server));
 
     let identify = libp2p::identify::Behaviour::new(
         libp2p::identify::Config::new("/p2s/id/1.0.0".into(), keypair.public())
