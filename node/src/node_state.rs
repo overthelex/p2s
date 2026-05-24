@@ -1,3 +1,4 @@
+use crate::metrics::Metrics;
 use libp2p::{Multiaddr, PeerId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -11,6 +12,7 @@ pub struct NodeState {
     pub stored_records: Arc<RwLock<usize>>,
     pub cmd_tx: mpsc::Sender<SwarmCommand>,
     pub pending_queries: Arc<Mutex<HashMap<QueryId, PendingQuery>>>,
+    pub metrics: Metrics,
 }
 
 pub struct PendingQuery {

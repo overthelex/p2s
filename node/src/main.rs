@@ -10,9 +10,11 @@ mod cli;
 mod event_loop;
 mod http_api;
 mod keypair_io;
+mod metrics;
 mod node_state;
 
 use cli::Cli;
+use metrics::Metrics;
 use node_state::NodeState;
 
 #[tokio::main]
@@ -62,7 +64,6 @@ async fn main() -> Result<()> {
     };
 
     let mut swarm = build_swarm(keypair, &config)?;
-
     swarm.listen_on(listen_addr)?;
 
     for (peer_id, addr) in &bootstrap_peers {
@@ -70,7 +71,7 @@ async fn main() -> Result<()> {
     }
     if !bootstrap_peers.is_empty() {
         if let Err(e) = swarm.behaviour_mut().kademlia.bootstrap() {
-            tracing::warn!("Kademlia bootstrap failed (no peers in routing table?): {e:?}");
+            tracing::warn!("Kademlia bootstrap failed: {e:?}");
         }
     }
 
@@ -84,6 +85,7 @@ async fn main() -> Result<()> {
         stored_records: Arc::new(RwLock::new(0)),
         cmd_tx,
         pending_queries: Arc::new(Mutex::new(HashMap::new())),
+        metrics: Metrics::new(),
     });
 
     let event_state = state.clone();
