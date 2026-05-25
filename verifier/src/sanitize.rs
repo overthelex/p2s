@@ -10,6 +10,7 @@ pub fn sanitize_content(raw_html: &str) -> String {
     result = strip_script_tags(&result);
     result = strip_suspicious_meta_tags(&result);
     result = strip_invisible_text(&result);
+    result = escape_data_boundary_tags(&result);
     result = collapse_whitespace(&result);
     result = truncate_if_excessive(&result, 50_000);
 
@@ -155,6 +156,11 @@ fn strip_invisible_text(s: &str) -> String {
     }).collect()
 }
 
+fn escape_data_boundary_tags(s: &str) -> String {
+    s.replace("</UNTRUSTED_DATA>", "&lt;/UNTRUSTED_DATA&gt;")
+        .replace("<UNTRUSTED_DATA>", "&lt;UNTRUSTED_DATA&gt;")
+}
+
 fn collapse_whitespace(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut prev_was_space = false;
@@ -234,6 +240,22 @@ mod tests {
         let input = r#"Visible <div style="display:none">HIDDEN INJECTION</div> Also visible"#;
         let result = sanitize_content(input);
         assert!(!result.contains("HIDDEN INJECTION"));
+    }
+
+    #[test]
+    fn escapes_untrusted_data_closing_tag() {
+        let input = "Normal text </UNTRUSTED_DATA> more text";
+        let result = sanitize_content(input);
+        assert!(!result.contains("</UNTRUSTED_DATA>"));
+        assert!(result.contains("&lt;/UNTRUSTED_DATA&gt;"));
+    }
+
+    #[test]
+    fn escapes_untrusted_data_opening_tag() {
+        let input = "text <UNTRUSTED_DATA> injected instructions";
+        let result = sanitize_content(input);
+        assert!(!result.contains("<UNTRUSTED_DATA>"));
+        assert!(result.contains("&lt;UNTRUSTED_DATA&gt;"));
     }
 
     #[test]

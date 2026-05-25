@@ -14,6 +14,7 @@ use std::collections::HashMap;
 pub struct CardRecordStore {
     records: HashMap<RecordKey, Record>,
     seq_cache: HashMap<RecordKey, u64>,
+    weight_cache: HashMap<RecordKey, f64>,
     max_records: usize,
     db: Option<sled::Db>,
 }
@@ -23,6 +24,7 @@ impl CardRecordStore {
         Self {
             records: HashMap::new(),
             seq_cache: HashMap::new(),
+            weight_cache: HashMap::new(),
             max_records,
             db: None,
         }
@@ -35,11 +37,25 @@ impl CardRecordStore {
         let mut store = Self {
             records: HashMap::new(),
             seq_cache: HashMap::new(),
+            weight_cache: HashMap::new(),
             max_records,
             db,
         };
         store.load_from_disk();
         store
+    }
+
+    pub fn set_trust_weight(&mut self, key: &RecordKey, weight: f64) {
+        self.weight_cache.insert(key.clone(), weight);
+        if let Some(db) = &self.db {
+            if let Ok(tree) = db.open_tree("weights") {
+                let _ = tree.insert(key.as_ref(), &weight.to_le_bytes());
+            }
+        }
+    }
+
+    pub fn get_trust_weight(&self, key: &RecordKey) -> Option<f64> {
+        self.weight_cache.get(key).copied()
     }
 
     fn load_from_disk(&mut self) {
@@ -62,6 +78,21 @@ impl CardRecordStore {
         }
         if loaded > 0 {
             tracing::info!(loaded, "Loaded records from disk");
+        }
+
+        if let Some(db) = &self.db {
+            if let Ok(tree) = db.open_tree("weights") {
+                for entry in tree.iter() {
+                    let Ok((key_bytes, weight_bytes)) = entry else {
+                        continue;
+                    };
+                    if weight_bytes.len() == 8 {
+                        let weight = f64::from_le_bytes(weight_bytes.as_ref().try_into().unwrap());
+                        self.weight_cache
+                            .insert(RecordKey::new(&key_bytes), weight);
+                    }
+                }
+            }
         }
     }
 
@@ -290,6 +321,61 @@ mod tests {
         store.put(record).unwrap();
         store.remove(&key);
         assert!(store.get(&key).is_none());
+    }
+
+    // ── set_trust_weight / get_trust_weight ───────────────────────────────
+
+    #[test]
+    fn trust_weight_set_and_get_round_trip() {
+        let mut store = CardRecordStore::new(100);
+        let (record, _) = make_signed_record(1);
+        let key = record.key.clone();
+
+        store.set_trust_weight(&key, 0.85);
+        assert_eq!(store.get_trust_weight(&key), Some(0.85));
+    }
+
+    #[test]
+    fn trust_weight_missing_key_returns_none() {
+        let store = CardRecordStore::new(100);
+        let phantom_key = RecordKey::new(&[0xABu8; 32]);
+        assert_eq!(store.get_trust_weight(&phantom_key), None);
+    }
+
+    #[test]
+    fn trust_weight_overwrite_updates_value() {
+        let mut store = CardRecordStore::new(100);
+        let (record, _) = make_signed_record(1);
+        let key = record.key.clone();
+
+        store.set_trust_weight(&key, 0.5);
+        store.set_trust_weight(&key, 0.99);
+        assert_eq!(store.get_trust_weight(&key), Some(0.99));
+    }
+
+    #[test]
+    fn trust_weight_zero_stored_and_retrieved() {
+        let mut store = CardRecordStore::new(100);
+        let (record, _) = make_signed_record(1);
+        let key = record.key.clone();
+
+        store.set_trust_weight(&key, 0.0);
+        assert_eq!(store.get_trust_weight(&key), Some(0.0));
+    }
+
+    #[test]
+    fn trust_weight_independent_per_key() {
+        let mut store = CardRecordStore::new(100);
+        let (rec_a, _) = make_signed_record(1);
+        let (rec_b, _) = make_signed_record(1);
+        let key_a = rec_a.key.clone();
+        let key_b = rec_b.key.clone();
+
+        store.set_trust_weight(&key_a, 0.3);
+        store.set_trust_weight(&key_b, 0.7);
+
+        assert_eq!(store.get_trust_weight(&key_a), Some(0.3));
+        assert_eq!(store.get_trust_weight(&key_b), Some(0.7));
     }
 
     #[test]

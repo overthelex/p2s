@@ -11,6 +11,8 @@ path = "src/main.rs"
 [dependencies]
 p2s-card = { path = "../card" }
 p2s-proto = { path = "../proto" }
+p2s-verifier = { path = "../verifier" }
+p2s-publisher = { path = "../publisher" }
 libp2p = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -27,3 +29,6 @@ serde_json = { workspace = true }
 hex = { workspace = true }
 portable-atomic = "1"
 sled = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

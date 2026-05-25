@@ -18,6 +18,9 @@ pub fn build_router(state: Arc<NodeState>) -> Router {
         .route("/node/info", get(node_info))
         .route("/metrics", get(metrics_prometheus))
         .route("/metrics/json", get(metrics_json))
+        .route("/appeals", post(submit_appeal))
+        .route("/admin/reviews", get(list_reviews))
+        .route("/admin/reviews/{address}", post(resolve_review))
         .with_state(state)
 }
 
@@ -25,6 +28,8 @@ pub fn build_router(state: Arc<NodeState>) -> Router {
 struct PublishCardRequest {
     record: CardRecordJson,
     sig: String,
+    #[serde(default)]
+    challenge_nonce: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +115,52 @@ async fn publish_card(
         }
     }
 
+    // §1.4 Free-text field hardening (label)
+    if let Some(ref label) = signed_card.record.label {
+        if let Err(e) = p2s_verifier::harden_label(label) {
+            state.metrics.inc_put_rejected();
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("invalid label: {e}")})));
+        }
+    }
+
+    // §1.3 Endpoint URL validation
+    if let Err(e) = p2s_verifier::validate_endpoint(&signed_card.record.endpoint) {
+        state.metrics.inc_put_rejected();
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("invalid endpoint: {e}")})));
+    }
+
+    // §1.1 Domain ownership (if challenge_nonce provided)
+    let mut trust_weight: Option<f64> = None;
+    if let Some(ref nonce_hex) = req.challenge_nonce {
+        let nonce_bytes = match hex::decode(nonce_hex) {
+            Ok(b) if b.len() == 16 => {
+                let mut arr = [0u8; 16];
+                arr.copy_from_slice(&b);
+                arr
+            }
+            Ok(b) => {
+                state.metrics.inc_put_rejected();
+                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("challenge_nonce must be 16 bytes, got {}", b.len())})));
+            }
+            Err(e) => {
+                state.metrics.inc_put_rejected();
+                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("invalid challenge_nonce hex: {e}")})));
+            }
+        };
+
+        match p2s_verifier::run_stage1(&signed_card, &nonce_bytes).await {
+            p2s_verifier::Stage1Outcome::Passed(facts) => {
+                trust_weight = Some(if facts.domain_verified { 1.0 } else { 0.0 });
+            }
+            p2s_verifier::Stage1Outcome::Rejected { step, reason } => {
+                state.metrics.inc_put_rejected();
+                return (StatusCode::FORBIDDEN, Json(serde_json::json!({
+                    "error": format!("verification failed at {step}: {reason}")
+                })));
+            }
+        }
+    }
+
     let card_domain = signed_card.record.domain.clone();
     let address = p2s_card::compute_address(&pubkey);
     let value = match p2s_proto::canonical_encode(&signed_card) {
@@ -130,7 +181,17 @@ async fn publish_card(
             if let Ok(mut limiter) = state.rate_limiter.lock() {
                 limiter.record_publish(&card_domain);
             }
-            (StatusCode::CREATED, Json(serde_json::json!({"address": hex::encode(address), "status": "published"})))
+            let addr_hex = hex::encode(address);
+            if let Some(w) = trust_weight {
+                if let Ok(mut weights) = state.trust_weights.lock() {
+                    weights.set(&addr_hex, w);
+                }
+            }
+            (StatusCode::CREATED, Json(serde_json::json!({
+                "address": addr_hex,
+                "status": "published",
+                "trust_weight": trust_weight,
+            })))
         }
         Ok(Ok(QueryResult::Error(e))) => {
             state.metrics.inc_put_rejected();
@@ -225,6 +286,9 @@ async fn fetch_card(
             state.metrics.inc_get_found();
             match p2s_proto::canonical_decode::<p2s_proto::SignedCard>(&value) {
                 Ok(card) => {
+                    let weight = state.trust_weights.lock()
+                        .ok()
+                        .and_then(|w| w.get(&address));
                     let resp = serde_json::json!({
                         "record": {
                             "pubkey": hex::encode(&card.record.pubkey),
@@ -237,6 +301,7 @@ async fn fetch_card(
                         },
                         "sig": hex::encode(&card.sig),
                         "address": address,
+                        "trust_weight": weight,
                     });
                     (StatusCode::OK, Json(resp))
                 }
@@ -284,4 +349,90 @@ async fn metrics_prometheus(State(state): State<Arc<NodeState>>) -> impl IntoRes
 
 async fn metrics_json(State(state): State<Arc<NodeState>>) -> impl IntoResponse {
     Json(state.metrics.render_json())
+}
+
+#[derive(Deserialize)]
+struct AppealRequest {
+    address: String,
+    reason: String,
+}
+
+async fn submit_appeal(
+    State(state): State<Arc<NodeState>>,
+    Json(req): Json<AppealRequest>,
+) -> impl IntoResponse {
+    let Some(ref queue) = state.review_queue else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "review queue not available"})),
+        );
+    };
+
+    let current_weight = state
+        .trust_weights
+        .lock()
+        .ok()
+        .and_then(|w| w.get(&req.address))
+        .unwrap_or(1.0);
+
+    match queue.submit(&req.address, req.reason, current_weight) {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({"status": "appeal_submitted", "address": req.address})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("failed to submit appeal: {e}")})),
+        ),
+    }
+}
+
+async fn list_reviews(State(state): State<Arc<NodeState>>) -> impl IntoResponse {
+    let Some(ref queue) = state.review_queue else {
+        return Json(serde_json::json!({"reviews": []}));
+    };
+
+    let reviews = queue.list_pending();
+    Json(serde_json::json!({"reviews": reviews}))
+}
+
+#[derive(Deserialize)]
+struct ResolveReviewRequest {
+    #[serde(default)]
+    new_weight: Option<f64>,
+}
+
+async fn resolve_review(
+    State(state): State<Arc<NodeState>>,
+    Path(address): Path<String>,
+    Json(req): Json<ResolveReviewRequest>,
+) -> impl IntoResponse {
+    let Some(ref queue) = state.review_queue else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "review queue not available"})),
+        );
+    };
+
+    if let Some(new_weight) = req.new_weight {
+        let clamped = new_weight.clamp(0.0, 1.0);
+        if let Ok(mut weights) = state.trust_weights.lock() {
+            weights.set(&address, clamped);
+        }
+    }
+
+    match queue.resolve(&address) {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "resolved", "address": address})),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "no pending review for this address"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("failed to resolve review: {e}")})),
+        ),
+    }
 }
