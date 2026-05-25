@@ -94,4 +94,35 @@ mod tests {
         let c2 = generate_challenge(&pubkey, "b.com");
         assert_ne!(c1.token, c2.token);
     }
+
+    // ── reconstruct_challenge additional cases ────────────────────────────
+
+    #[test]
+    fn different_pubkeys_same_nonce_produce_different_tokens() {
+        let nonce = [0x11u8; 16];
+        let pubkey_a = [0xAAu8; 32];
+        let pubkey_b = [0xBBu8; 32];
+
+        let token_a = reconstruct_challenge(&pubkey_a, "example.com", &nonce).token;
+        let token_b = reconstruct_challenge(&pubkey_b, "example.com", &nonce).token;
+
+        assert_ne!(
+            token_a, token_b,
+            "different pubkeys must produce different tokens even with the same nonce"
+        );
+    }
+
+    #[test]
+    fn different_domains_same_nonce_produce_different_tokens() {
+        let nonce = [0x22u8; 16];
+        let pubkey = [0xCCu8; 32];
+
+        let token_alpha = reconstruct_challenge(&pubkey, "alpha.example.com", &nonce).token;
+        let token_beta = reconstruct_challenge(&pubkey, "beta.example.com", &nonce).token;
+
+        assert_ne!(
+            token_alpha, token_beta,
+            "different domains must produce different tokens even with the same nonce"
+        );
+    }
 }

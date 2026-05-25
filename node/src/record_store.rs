@@ -323,6 +323,61 @@ mod tests {
         assert!(store.get(&key).is_none());
     }
 
+    // ── set_trust_weight / get_trust_weight ───────────────────────────────
+
+    #[test]
+    fn trust_weight_set_and_get_round_trip() {
+        let mut store = CardRecordStore::new(100);
+        let (record, _) = make_signed_record(1);
+        let key = record.key.clone();
+
+        store.set_trust_weight(&key, 0.85);
+        assert_eq!(store.get_trust_weight(&key), Some(0.85));
+    }
+
+    #[test]
+    fn trust_weight_missing_key_returns_none() {
+        let store = CardRecordStore::new(100);
+        let phantom_key = RecordKey::new(&[0xABu8; 32]);
+        assert_eq!(store.get_trust_weight(&phantom_key), None);
+    }
+
+    #[test]
+    fn trust_weight_overwrite_updates_value() {
+        let mut store = CardRecordStore::new(100);
+        let (record, _) = make_signed_record(1);
+        let key = record.key.clone();
+
+        store.set_trust_weight(&key, 0.5);
+        store.set_trust_weight(&key, 0.99);
+        assert_eq!(store.get_trust_weight(&key), Some(0.99));
+    }
+
+    #[test]
+    fn trust_weight_zero_stored_and_retrieved() {
+        let mut store = CardRecordStore::new(100);
+        let (record, _) = make_signed_record(1);
+        let key = record.key.clone();
+
+        store.set_trust_weight(&key, 0.0);
+        assert_eq!(store.get_trust_weight(&key), Some(0.0));
+    }
+
+    #[test]
+    fn trust_weight_independent_per_key() {
+        let mut store = CardRecordStore::new(100);
+        let (rec_a, _) = make_signed_record(1);
+        let (rec_b, _) = make_signed_record(1);
+        let key_a = rec_a.key.clone();
+        let key_b = rec_b.key.clone();
+
+        store.set_trust_weight(&key_a, 0.3);
+        store.set_trust_weight(&key_b, 0.7);
+
+        assert_eq!(store.get_trust_weight(&key_a), Some(0.3));
+        assert_eq!(store.get_trust_weight(&key_b), Some(0.7));
+    }
+
     #[test]
     fn revocation_via_higher_seq() {
         let mut store = CardRecordStore::new(100);
