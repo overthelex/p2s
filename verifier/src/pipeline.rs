@@ -1,12 +1,13 @@
 use crate::agent::VerificationAgent;
 use crate::sanitize::sanitize_content;
+use crate::stage1::Stage1Facts;
 use crate::verdict::{compute_admit_decision, AdmitDecision, VerificationVerdict};
 use anyhow::Result;
 
 /// The full verification pipeline (§3.6).
 ///
 /// Order of operations (DECIDED):
-/// 1. Domain ownership runs FIRST as a deterministic precheck, outside the agent
+/// 1. Stage 1 deterministic checks run FIRST, outside the agent
 /// 2. Content is pre-sanitized (cheap non-LLM filter)
 /// 3. Agent reads sanitized content as data (never instructions)
 /// 4. Agent returns structured verdict
@@ -20,11 +21,41 @@ impl<A: VerificationAgent> VerificationPipeline<A> {
         Self { agent }
     }
 
-    /// Run the full verification pipeline.
+    /// Run Stage 2 of the verification pipeline.
     ///
-    /// `domain_verified` comes from the deterministic precheck (§3.4),
-    /// NOT from the agent. The caller must run domain verification first.
+    /// Stage 1 facts come from the deterministic precheck and are injected
+    /// as established truth — the agent has no authority to alter them.
     pub async fn verify(
+        &self,
+        stage1: &Stage1Facts,
+        card_endpoint: &str,
+        card_domain: &str,
+        card_label: Option<&str>,
+        raw_site_content: &str,
+    ) -> Result<(VerificationVerdict, AdmitDecision)> {
+        let sanitized = sanitize_content(raw_site_content);
+
+        let assessment = self
+            .agent
+            .assess(card_endpoint, card_domain, card_label, &sanitized)
+            .await?;
+
+        let verdict = VerificationVerdict {
+            domain_verified: stage1.domain_verified,
+            copy_found: assessment.copy_found,
+            copy_source_url: assessment.copy_source_url,
+            correspondence_score: assessment.correspondence_score,
+            notes: assessment.notes,
+        };
+
+        let decision = compute_admit_decision(&verdict);
+
+        Ok((verdict, decision))
+    }
+
+    /// Convenience: run the legacy API with just domain_verified.
+    /// Kept for backward compatibility with existing tests.
+    pub async fn verify_simple(
         &self,
         domain_verified: bool,
         card_endpoint: &str,
@@ -32,32 +63,15 @@ impl<A: VerificationAgent> VerificationPipeline<A> {
         card_label: Option<&str>,
         raw_site_content: &str,
     ) -> Result<(VerificationVerdict, AdmitDecision)> {
-        // Step 1: domain check is already done by caller (deterministic)
-
-        // Step 2: pre-sanitize untrusted content
-        let sanitized = sanitize_content(raw_site_content);
-
-        // Step 3 & 4: agent assessment with data isolation
-        let assessment = self.agent.assess(
-            card_endpoint,
-            card_domain,
-            card_label,
-            &sanitized,
-        ).await?;
-
-        // Step 5: build verdict (domain_verified from precheck, rest from agent)
-        let verdict = VerificationVerdict {
+        let facts = Stage1Facts {
             domain_verified,
-            copy_found: assessment.copy_found,
-            copy_source_url: assessment.copy_source_url,
-            correspondence_score: assessment.correspondence_score,
-            notes: assessment.notes,
+            endpoint_valid: true,
+            manifest_valid: true,
+            manifest: None,
+            label_hardened: card_label.map(|s| s.to_string()),
         };
-
-        // Step 6: code-side admit decision (agent does NOT approve)
-        let decision = compute_admit_decision(&verdict);
-
-        Ok((verdict, decision))
+        self.verify(&facts, card_endpoint, card_domain, card_label, raw_site_content)
+            .await
     }
 }
 
@@ -94,7 +108,7 @@ mod tests {
         };
         let pipeline = VerificationPipeline::new(agent);
 
-        let (verdict, decision) = pipeline.verify(
+        let (verdict, decision) = pipeline.verify_simple(
             true, // domain verified by precheck
             "https://example.com/api",
             "example.com",
@@ -119,7 +133,7 @@ mod tests {
         };
         let pipeline = VerificationPipeline::new(agent);
 
-        let (_, decision) = pipeline.verify(
+        let (_, decision) = pipeline.verify_simple(
             false, // domain NOT verified
             "https://fake.com/api",
             "fake.com",
@@ -159,7 +173,7 @@ mod tests {
         let pipeline = VerificationPipeline::new(SanitizationCheckAgent);
 
         let malicious = "Normal text <!-- INJECTION --> <script>evil()</script> \u{200B}hidden";
-        let (_, decision) = pipeline.verify(
+        let (_, decision) = pipeline.verify_simple(
             true,
             "https://example.com",
             "example.com",
@@ -184,7 +198,7 @@ mod tests {
         };
         let pipeline = VerificationPipeline::new(agent);
 
-        let (_, decision) = pipeline.verify(
+        let (_, decision) = pipeline.verify_simple(
             false, // domain failed — this overrides everything
             "https://evil.com",
             "evil.com",

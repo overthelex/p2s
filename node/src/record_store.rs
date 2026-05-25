@@ -14,6 +14,7 @@ use std::collections::HashMap;
 pub struct CardRecordStore {
     records: HashMap<RecordKey, Record>,
     seq_cache: HashMap<RecordKey, u64>,
+    weight_cache: HashMap<RecordKey, f64>,
     max_records: usize,
     db: Option<sled::Db>,
 }
@@ -23,6 +24,7 @@ impl CardRecordStore {
         Self {
             records: HashMap::new(),
             seq_cache: HashMap::new(),
+            weight_cache: HashMap::new(),
             max_records,
             db: None,
         }
@@ -35,11 +37,25 @@ impl CardRecordStore {
         let mut store = Self {
             records: HashMap::new(),
             seq_cache: HashMap::new(),
+            weight_cache: HashMap::new(),
             max_records,
             db,
         };
         store.load_from_disk();
         store
+    }
+
+    pub fn set_trust_weight(&mut self, key: &RecordKey, weight: f64) {
+        self.weight_cache.insert(key.clone(), weight);
+        if let Some(db) = &self.db {
+            if let Ok(tree) = db.open_tree("weights") {
+                let _ = tree.insert(key.as_ref(), &weight.to_le_bytes());
+            }
+        }
+    }
+
+    pub fn get_trust_weight(&self, key: &RecordKey) -> Option<f64> {
+        self.weight_cache.get(key).copied()
     }
 
     fn load_from_disk(&mut self) {
@@ -62,6 +78,21 @@ impl CardRecordStore {
         }
         if loaded > 0 {
             tracing::info!(loaded, "Loaded records from disk");
+        }
+
+        if let Some(db) = &self.db {
+            if let Ok(tree) = db.open_tree("weights") {
+                for entry in tree.iter() {
+                    let Ok((key_bytes, weight_bytes)) = entry else {
+                        continue;
+                    };
+                    if weight_bytes.len() == 8 {
+                        let weight = f64::from_le_bytes(weight_bytes.as_ref().try_into().unwrap());
+                        self.weight_cache
+                            .insert(RecordKey::new(&key_bytes), weight);
+                    }
+                }
+            }
         }
     }
 

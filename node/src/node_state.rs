@@ -1,6 +1,6 @@
 use crate::metrics::Metrics;
 use libp2p::{Multiaddr, PeerId};
-use p2s_node::RateLimiter;
+use p2s_node::{RateLimiter, ReviewQueue, TrustWeightStore};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::{mpsc, oneshot};
@@ -15,6 +15,8 @@ pub struct NodeState {
     pub pending_queries: Arc<Mutex<HashMap<QueryId, PendingQuery>>>,
     pub metrics: Metrics,
     pub rate_limiter: Mutex<RateLimiter>,
+    pub trust_weights: Mutex<TrustWeightStore>,
+    pub review_queue: Option<ReviewQueue>,
 }
 
 pub struct PendingQuery {

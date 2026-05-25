@@ -31,6 +31,23 @@ pub fn generate_challenge(pubkey: &[u8], domain: &str) -> ChallengeToken {
     }
 }
 
+/// Reconstruct a challenge token from a known nonce (for verification by the node).
+/// The node receives the nonce from the publisher and recomputes the expected token.
+pub fn reconstruct_challenge(pubkey: &[u8], domain: &str, nonce: &[u8; 16]) -> ChallengeToken {
+    let token_hash = blake3::keyed_hash(
+        &blake3::hash(b"p2s-domain-challenge").into(),
+        &[pubkey, domain.as_bytes(), nonce.as_slice()].concat(),
+    );
+    let token = format!("p2s-verify={}", hex_encode(token_hash.as_bytes()));
+
+    ChallengeToken {
+        token,
+        nonce: *nonce,
+        dns_record_name: format!("_p2s-verify.{domain}"),
+        wellknown_path: format!("https://{domain}/.well-known/p2s-verify"),
+    }
+}
+
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -49,6 +66,16 @@ mod tests {
         assert_eq!(challenge.token.len(), 11 + 64);
         assert_eq!(challenge.dns_record_name, "_p2s-verify.example.com");
         assert_eq!(challenge.wellknown_path, "https://example.com/.well-known/p2s-verify");
+    }
+
+    #[test]
+    fn reconstruct_matches_generate() {
+        let pubkey = [0xABu8; 32];
+        let generated = generate_challenge(&pubkey, "example.com");
+        let reconstructed = reconstruct_challenge(&pubkey, "example.com", &generated.nonce);
+        assert_eq!(generated.token, reconstructed.token);
+        assert_eq!(generated.dns_record_name, reconstructed.dns_record_name);
+        assert_eq!(generated.wellknown_path, reconstructed.wellknown_path);
     }
 
     #[test]

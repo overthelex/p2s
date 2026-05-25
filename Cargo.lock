@@ -2303,6 +2303,8 @@ dependencies = [
  "libp2p",
  "p2s-card",
  "p2s-proto",
+ "p2s-publisher",
+ "p2s-verifier",
  "portable-atomic",
  "serde",
  "serde_json",
@@ -2372,14 +2374,19 @@ name = "p2s-verifier"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
+ "chrono",
  "p2s-card",
  "p2s-proto",
+ "p2s-publisher",
+ "reqwest",
  "serde",
  "serde_bytes",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]

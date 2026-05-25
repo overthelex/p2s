@@ -79,6 +79,20 @@ async fn main() -> Result<()> {
     let (cmd_tx, cmd_rx) = mpsc::channel(256);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
+    let (trust_weights, review_queue) = if let Some(ref data_dir) = config.data_dir {
+        let db_path = data_dir.join("node_meta.sled");
+        if let Ok(db) = sled::open(&db_path) {
+            (
+                p2s_node::TrustWeightStore::with_persistence(&db),
+                Some(p2s_node::ReviewQueue::new(&db)),
+            )
+        } else {
+            (p2s_node::TrustWeightStore::new(), None)
+        }
+    } else {
+        (p2s_node::TrustWeightStore::new(), None)
+    };
+
     let state = Arc::new(NodeState {
         peer_id,
         listen_addrs: Arc::new(RwLock::new(Vec::new())),
@@ -88,6 +102,8 @@ async fn main() -> Result<()> {
         pending_queries: Arc::new(Mutex::new(HashMap::new())),
         metrics: Metrics::new(),
         rate_limiter: Mutex::new(p2s_node::RateLimiter::new()),
+        trust_weights: Mutex::new(trust_weights),
+        review_queue,
     });
 
     let event_state = state.clone();
